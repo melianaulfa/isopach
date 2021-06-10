@@ -1,0 +1,168 @@
+# Import Python toolboxes
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.interpolate import griddata
+from scipy.interpolate import interp1d
+from scipy.interpolate import interp2d
+import matplotlib as mpl
+from mpl_toolkits import mplot3d
+%matplotlib inline
+
+# Create a function to read the file and create universal grid for both horizons
+
+def gridxy(filename):
+    df = pd.read_csv(filename)
+    X = df["X"]
+    Y = df["Y"]
+    x = np.arange(np.min(X),np.max(X),100)
+    y = np.arange(np.min(Y),np.max(Y),100)
+    grid_x, grid_y = np.meshgrid(x, y)
+    return(grid_x,grid_y)
+    
+# Call the function to create the universal grid
+
+grid_x,grid_y = gridxy('PP_SD_35_55.csv')
+
+# Note: The inputted file should be the one that has smaller shape. In this case, the smaller one is the lower horizon.
+
+# Create a function to tie the depth points to the universal grid and set up minimum and maximum values for the color map
+
+def upperhorizon(filename,grid_x,grid_y):
+    df = pd.read_csv(filename)
+    twtu = df["TWT"]
+    X = df["X"]
+    Y = df["Y"]
+    points = np.stack([X,Y],axis=1) # The points are sourced from the X and Y coordinate of the file
+    value = twtu                    
+    mintwtu = value.min()           # This will be loaded to set up the colormap
+    maxtwtu = value.max()
+    grid_zu = griddata(points, value, (grid_x, grid_y), method='cubic') # The points are tied up to the universal grid
+    return(grid_x,grid_y,grid_zu,mintwtu,maxtwtu,twtu)
+    
+# Call the function and map the upper horizon
+
+grid_x,grid_y,grid_zu,mintwtu,maxtwtu,twtu = upperhorizon('PP_SD_35_95.csv',grid_x,grid_y)
+# Set up the map boundary:
+xmin = np.min(grid_x)
+xmax = np.max(grid_x)
+ymin = np.min(grid_y)
+ymax = np.max(grid_y)
+# Set up the map size:
+plt.figure(figsize=(10, 6))
+plt.imshow(np.flipud(grid_zu),cmap='gist_earth_r',extent = [xmin, xmax, ymin, ymax],aspect='auto') # Added _r to reverse the color map
+cb = plt.colorbar()
+plt.clim(mintwtu, maxtwtu); #limit the colorbar from lowest value to highest value of depth
+cb.set_label('TWT (ms)', fontsize=12)
+plt.title('Upper Horizon')
+plt.xlabel('Easting (km)')
+plt.ylabel('Northing (km)');
+#plt.savefig('UpperHorizon.png',dpi=300); # Optional line to save the map
+
+# Create similar function to tie the depth points to the universal grid and set up minimum and maximum values for the color map for the lower horizon.
+# This is being done separately so that the depth points along with the maximum and minimum values are not being mixed up with the upper horizon values.
+
+def lowerhorizon(filename,grid_x,grid_y):
+    df = pd.read_csv(filename)
+    twtl = df["TWT"]
+    X = df["X"]
+    Y = df["Y"]
+    points = np.stack([X,Y],axis=1)
+    value = twtl                    # Initialize depth values for the lower horizon
+    mintwtl = value.min()
+    maxtwtl = value.max()
+    grid_zl = griddata(points, value, (grid_x, grid_y), method='cubic') # The points are tied up to the universal grid
+    return(grid_x,grid_y,grid_zl,mintwtl,maxtwtl,twtl) # This function entirely produces values for the lower horizon, except for the universal grid.
+    
+# Call the function and map the lower horizon
+
+grid_x,grid_y,grid_zl,mintwtl,maxtwtl,twtl = lowerhorizon('PP_SD_35_55.csv',grid_x,grid_y)
+xmin = np.min(grid_x)
+xmax = np.max(grid_x)
+ymin = np.min(grid_y)
+ymax = np.max(grid_y)
+plt.figure(figsize=(10, 6))
+plt.imshow(np.flipud(grid_zl),cmap='gist_earth_r',extent = [xmin, xmax, ymin, ymax],aspect='auto')
+cb = plt.colorbar()
+plt.clim(mintwtl, maxtwtl);    # The values are different than the values from the upper horizon
+cb.set_label('TWT (ms)', fontsize=12)
+plt.title('Lower Horizon')
+plt.xlabel('Easting (km)')
+plt.ylabel('Northing (km)');
+#plt.savefig('LowerHorizon.png',dpi=300);
+
+# Calculate the thickness from the depth differences between the upper and lower horizons and produce the map using the universal grid.
+
+thicknesstwt = grid_zl-grid_zu # Calculating the thickness
+xmin = np.min(grid_x)
+xmax = np.max(grid_x)
+ymin = np.min(grid_y)
+ymax = np.max(grid_y)
+plt.figure(figsize=(10, 6))
+plt.imshow(np.flipud(thicknesstwt),cmap='gist_earth_r',extent = [xmin, xmax, ymin, ymax],aspect='auto')
+cb = plt.colorbar()
+plt.clim(0,800)
+cb.set_label('TWT (ms)', fontsize=12)
+plt.title('Isopach Map I')
+plt.xlabel('Easting (km)')
+plt.ylabel('Northing (km)');
+#plt.savefig('IsopachTWT.png',dpi=300);
+
+# Create a function to do the time depth conversion using the existing checkshot
+
+def TDConv(filename,twtu,twtl):    # Aside from calling the checkshot file, the function will also call the depths from upper and lower horizons
+    TDC= pd.read_csv(filename)
+    depth = TDC['M']
+    time = TDC['TWT']
+    idepth = np.linspace(np.min(depth),np.max(depth),2100) # Interpolate the depth values
+    itime = np.linspace(np.min(time),np.max(time),2100) # Interpolate the two way time values
+    f = interp1d(idepth, itime, kind = "linear") # Set up the equation to convert the two way time to depth
+    cudepth = f(twtu) # Convert the upper horizon from TWT to meter
+    cldepth = f(twtl) # Convert the lower horizon from TWT to meter
+    return(cudepth,cldepth)
+    
+# Call the function to produce the depth in meters for upper and lower horizons
+
+cudepth,cldepth = TDConv('checkshot.csv',twtu,twtl)
+
+# Create a similar function for gridding the depth values of the upper horizon in spatial dimension
+
+def cuhorizon(filename,grid_x,grid_y):
+    df = pd.read_csv(filename)
+    twtu = df["TWT"]
+    X = df["X"]
+    Y = df["Y"]
+    points = np.stack([X,Y],axis=1)
+    grid_cdu = griddata(points, cudepth, (grid_x, grid_y), method='cubic')
+    return(grid_x,grid_y,grid_cdu)
+grid_x,grid_y,grid_cdu = cuhorizon('PP_SD_35_95.csv',grid_x,grid_y)
+
+# Create another similar function for gridding the depth values of the lower horizon in spatial dimension
+
+def clhorizon(filename,grid_x,grid_y):
+    df = pd.read_csv(filename)
+    twtl = df["TWT"]
+    X = df["X"]
+    Y = df["Y"]
+    points = np.stack([X,Y],axis=1)
+    grid_cdl = griddata(points, cldepth, (grid_x, grid_y), method='cubic')
+    return(grid_x,grid_y,grid_cdl)
+grid_x,grid_y,grid_cdl = clhorizon('PP_SD_35_55.csv',grid_x,grid_y)
+
+# Calculate the thickness in spatial domain and map the thickness map with the universal grid
+
+thicknessm = grid_cdl-grid_cdu
+xmin = np.min(grid_x)
+xmax = np.max(grid_x)
+ymin = np.min(grid_y)
+ymax = np.max(grid_y)
+plt.figure(figsize=(10, 6))
+plt.imshow(np.flipud(thicknessm),cmap='gist_earth_r',extent = [xmin, xmax, ymin, ymax],aspect='auto')
+cb = plt.colorbar()
+plt.clim(0,800)
+cb.set_label('Thickness (m)', fontsize=12)
+plt.title('Isopach Map II')
+plt.xlabel('Easting (km)')
+plt.ylabel('Northing (km)');
+plt.savefig('IsopachM.png',dpi=300);
